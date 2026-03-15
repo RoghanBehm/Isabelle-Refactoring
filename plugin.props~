@@ -1,0 +1,7 @@
+plugin.isabelle.jedit.Hello_Plugin.name=Hello
+plugin.isabelle.jedit.Hello_Plugin.author=Roghan
+plugin.isabelle.jedit.Hello_Plugin.version=0.1
+plugin.isabelle.jedit.Hello_Plugin.description=POC Isabelle/jEdit refactoring actions
+plugin.isabelle.jedit.Hello_Plugin.activate=startup
+
+

@@ -1,0 +1,7 @@
+plugin.isabelle.jedit.Rename_Plugin.name=Hello
+plugin.isabelle.jedit.Rename_Plugin.author=Roghan
+plugin.isabelle.jedit.Rename_Plugin.version=0.1
+plugin.isabelle.jedit.Rename_Plugin.description=POC Isabelle/jEdit refactoring actions
+plugin.isabelle.jedit.Rename_Plugin.activate=startup
+
+
