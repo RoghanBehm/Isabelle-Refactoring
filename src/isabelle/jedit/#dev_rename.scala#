@@ -476,7 +476,6 @@ object Headless_Handler {
     }
 
     session.commands_changed += consumer
-    // check immediately in case already consolidated
     val state = session.get_state()
     for (version <- state.stable_tip_version) {
       if (theory_nodes.forall(name => state.node_consolidated(version, name))) {
