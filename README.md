@@ -1,59 +1,53 @@
-# Isabelle/jEdit Plugin Template
+# Isabelle/jEdit Refactoring Plugin
 
-This repo serves as a template for building an Isabelle/jEdit "plugin" (jEdit action-set packaged as a `.jar`)
-using Isabelle's Scala toolchain. Actions are registered via `actions.xml`, labelled via `Hello.props`, and
-a core plugin class is declared via `Hello_Plugin.scala` + `plugin.props` to avoid the "MISSING PLUGIN CORE 
-CLASS" label in the shortcuts UI.
+A plugin for Isabelle/jEdit that adds refactoring actions to the editor.
 
+**Currently implemented:** rename symbol across theory files.
 
-## Directory layout
+> Work in progress.
 
-- `src/isabelle/jedit/sb_rename.scala`
-  Scala code containing action entrypoints (e.g. `Refactor.rename(view)`).
+## Prerequisites
 
-- `src/isabelle/jedit/Hello_Plugin.scala`
-  Optional core plugin class (`extends EditPlugin`). Makes jEdit treat this as a "proper" plugin.
+- Isabelle (tested on Isabelle2025-2)
+- jEdit bundled with Isabelle
 
-- `actions.xml`
-  Declares the action IDs and the code that runs when they trigger (calls into Scala methods).
+## Repository layout
 
-- `Hello.props`
-  Human-readable labels for actions (shown in menus / *Utilities -> Global Options -> Shortcuts*).
+### Source files
+| File | Purpose |
+|------|---------|
+| `src/isabelle/jedit/dev_rename.scala` | Action entrypoints (e.g. `Refactor.rename(view)`) |
+| `src/isabelle/jedit/Rename_Plugin.scala` | Core plugin class (`extends EditPlugin`): makes jEdit treat this as a proper plugin |
+| `actions.xml` | Declares action IDs and the code that runs when they trigger |
+| `Rename.props` | Human-readable action labels, shown in menus and the Shortcuts dialog |
+| `plugin.props` | Plugin metadata and core class declaration (required to avoid a "MISSING PLUGIN CORE CLASS" error) |
 
-- `plugin.props`
-  Declares the plugin core class and basic metadata. Required if you want to avoid
-  “MISSING PLUGIN CORE CLASS”.
+### Build artifacts (generated)
+| Path | Contents |
+|------|---------|
+| `classes/` | Compiled `.class` files |
+| `jarroot/` | Staging directory for assembling the jar |
+| `Hello.jar` | Final plugin jar |
 
+## Building
 
-Build artifacts:
-- `classes/`   compiled `.class` files
-- `jarroot/`   staging directory used to assemble jar contents
-- `Hello.jar`  final plugin jar
-
-
-## Building the plugin
-
+Run the build script to compile and install the plugin:
 ```bash
-# Clean old artifacts
-rm -rf classes jarroot Hello.jar
-mkdir -p classes jarroot
-
-# Compile Scala sources into ./classes
-isabelle scalac -d classes \
-  src/isabelle/jedit/sb_rename.scala \
-  src/isabelle/jedit/Hello_Plugin.scala
-
-# Stage jar contents
-cp -r classes/* jarroot/
-cp actions.xml Hello.props plugin.props jarroot/
-
-# Create the plugin jar
-jar cf Hello.jar -C jarroot .
-
-# Copy jar to Isabelle/jEdit. On my setup, this looks like:
-cp Hello.jar ~/.isabelle/Isabelle2025-2/jedit/jars/
+./build.sh
 ```
 
-## Using the plugin
-After copying the jar as instructed above, open Isabelle and go to *Utilities ->
-Global Options -> Shortcuts* to bind the action to a hotkey.
+The script compiles the plugin and copies the jar into your Isabelle plugins 
+directory. **Before running it**, open `build.sh` and update the destination 
+path in the final `cp` command to match your Isabelle installation:
+```bash
+# Example — change this to your actual Isabelle path:
+cp Hello.jar ~/Isabelle2024/jedit/jars/
+```
+
+## Usage
+
+1. Build and install the plugin (see above).
+2. Open Isabelle/jEdit.
+3. Go to **Utilities → Global Options → Shortcuts**.
+4. Search for the rename action and bind it to a key.
+5. Place your cursor on a symbol and trigger the shortcut to rename it.
