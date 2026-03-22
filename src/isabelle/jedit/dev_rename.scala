@@ -366,6 +366,7 @@ object Headless_Handler {
   /* Promise interrupt */
 
   @volatile private var cancel_promise: Option[Promise[Document.State]] = None
+  @volatile private var last_event_time: Long = System.currentTimeMillis()
 
   def cancel(): Unit = {
     cancel_promise.foreach(_.tryFailure(new Exception("Cancelled")))
@@ -518,12 +519,18 @@ object Headless_Handler {
           done.tryFailure(new Exception("Cancelled"))
           ()
         } else {
+          last_event_time = System.currentTimeMillis()
           val state = session.get_state()
           for (version <- state.stable_tip_version) {
             for (name <- theory_nodes) {
               if (!reported.contains(name) && state.node_consolidated(version, name)) {
                 reported += name
                 val display_name = name.theory.stripPrefix("Draft.")
+                val snapshot = state.snapshot(name)
+                val errors = collect_errors(snapshot)
+                if (errors.nonEmpty) {
+                  progress.echo_warning(s"Errors in $display_name: ${errors.head}")
+                }
                 progress.theory(isabelle.Progress.Theory(display_name, percentage = Some(100)))
               }
             }
@@ -541,12 +548,54 @@ object Headless_Handler {
         done.trySuccess(state)
       }
     }
-
+    err_watcher(done.future)
     try { Await.result(done.future, Duration.Inf) }
     finally {
       session.commands_changed -= consumer
       cancel_promise = None
     }
 
+  }
+  private def collect_errors(
+      snapshot: Document.Snapshot
+  ): List[String] = {
+    val full_range = Text.Range(0, snapshot.node.source.length)
+    snapshot
+      .cumulate[List[String]](
+        full_range,
+        Nil,
+        Rendering.error_elements,
+        _ => { case (acc, Text.Info(_, XML.Elem(_, body))) =>
+          Some(XML.content(body).take(200) :: acc)
+        }
+      )
+      .flatMap(_.info)
+  }
+  private def err_watcher(
+      future: scala.concurrent.Future[Document.State]
+  ): Unit = {
+    val watchdog = new Thread(
+      () => {
+        var warned = false
+        while (!future.isCompleted) {
+          Thread.sleep(5000)
+          val idle = System.currentTimeMillis() - last_event_time
+          if (!warned && idle > 30000 && !future.isCompleted) {
+            warned = true
+            GUI_Thread.later {
+              JOptionPane.showMessageDialog(
+                null,
+                "Session looks stuck, likely a syntax or proof error.\nClose the progress dialog to cancel.",
+                "Warning",
+                JOptionPane.WARNING_MESSAGE
+              )
+            }
+          }
+        }
+      },
+      "await-watchdog"
+    )
+    watchdog.setDaemon(true)
+    watchdog.start()
   }
 }
