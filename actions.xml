@@ -4,8 +4,5 @@
   <ACTION NAME="refactor.rename">
     <CODE>isabelle.jedit.Refactor.rename(view);</CODE>
   </ACTION>
-  <ACTION NAME="refactor.show_markup">
-    <CODE>isabelle.jedit.Refactor.show_markup(view);</CODE>
-  </ACTION>
 </ACTIONS>
 
