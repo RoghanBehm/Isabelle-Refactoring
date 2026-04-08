@@ -27,7 +27,9 @@ object Promote_Have {
       snapshot.node.command_iterator(caret).nextOption() match {
         case Some((cmd, cmd_start)) if cmd.span.name == "have" =>
           have_block_range(snapshot.node, cmd_start) match {
-            case Some(range) => run_promote(view, snapshot, cmd, range)
+            case Some(range) =>
+              val source = view.getBuffer.getText(range.start, range.length)
+              run_promote(view, snapshot, HaveBlock(cmd, range, source, None))
             case None        =>
               JOptionPane.showMessageDialog(
                 view,
@@ -47,13 +49,24 @@ object Promote_Have {
     }
   }
 
-  def run_promote(view: View, snapshot: Document.Snapshot, cmd: Command, range: Text.Range) = {
-    view.getBuffer.remove(range.start, range.length)
-  }
+  def run_promote(view: View, snapshot: Document.Snapshot, block: HaveBlock): Unit = {
+    val insert_offset = MarkupUtils.offset_after_begin(snapshot).get
+    val lemma_text = "\n\nlemma " + block.source.stripPrefix("have ") + "\n"
+    val edits = List(
+      Edit.Insert(insert_offset, lemma_text),
+      Edit.Delete(block.range)
+    )
 
-  def global_write(view: View, snapshot: Document.Snapshot, text: String): Unit = {
-    val w_loc = MarkupUtils.offset_after_begin(snapshot).get
-    view.getBuffer.insert(w_loc, text)
+    val text = view.getBuffer.getText(0, view.getBuffer.getLength)
+    val new_text = Edit.apply_to_text(text, edits)
+    view.getBuffer.beginCompoundEdit()
+    try {
+      view.getBuffer.remove(0, view.getBuffer.getLength)
+      view.getBuffer.insert(0, new_text)
+    } finally {
+      view.getBuffer.endCompoundEdit()
+    }
+    view.getBuffer.save(view, null)
   }
 
   def have_block_range(node: Document.Node, have_start: Text.Offset): Option[Text.Range] = {
