@@ -1,0 +1,40 @@
+theory Refactor_Setup
+  imports Pure
+begin
+
+ML \<open>
+  val _ = Command.print_function "check_liftable"
+  (fn {command_name, ...} =>
+     if command_name = "by" orelse command_name = "done"
+       orelse command_name = "qed"
+     then
+       SOME {delay = NONE, pri = 1, persistent = true, strict = false,
+       print_fn = fn _ => fn state =>
+          if Toplevel.is_proof state then
+          let
+            val proof = Toplevel.proof_of state
+            val ctxt = Proof.context_of proof
+            val thy = Proof.theory_of proof
+            val fact = Proof.the_fact proof
+            val prop = Thm.prop_of fact
+          
+            val hyps_n = length (Thm.hyps_of fact)
+            val deps = Thm_Deps.thm_deps thy [fact]
+            val dep_names = map (fn (_, tn) => fst tn) deps
+            val free_names = map fst (Term.add_frees prop [])  (* Second arg is type. This might
+                                                           matter, need to think about it more *)
+            val fixed = Variable.add_fixed_names ctxt prop []
+
+
+	      
+            in
+             Output.writeln (
+              "LIFTABLE:" ^
+              " hyps=" ^ Int.toString hyps_n ^
+              " deps=[" ^ String.concatWith "," dep_names ^ "]" ^
+              " frees=[" ^ String.concatWith "," free_names ^ "]" ^
+              " fixed=[" ^ String.concatWith "," fixed ^ "]"
+            ) end
+          else ()}
+    else NONE)
+\<close>
