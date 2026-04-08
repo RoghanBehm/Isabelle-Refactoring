@@ -4,5 +4,8 @@
   <ACTION NAME="refactor.rename">
     <CODE>isabelle.jedit.Refactor.rename(view);</CODE>
   </ACTION>
+  <ACTION NAME="refactor.promote_have">
+    <CODE>isabelle.jedit.Refactor.promote_have(view);</CODE>
+  </ACTION>
 </ACTIONS>
 

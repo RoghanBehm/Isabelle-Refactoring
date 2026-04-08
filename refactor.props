@@ -1,2 +1,3 @@
 refactor.rename.label=Rename: cross-buffer entity renaming
+refactor.promote_have.label=Promote have: Promote a have block to a global lemma
 refactor.show_markup.label=Show markup: dump markup for an entity

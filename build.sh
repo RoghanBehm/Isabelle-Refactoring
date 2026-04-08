@@ -10,7 +10,8 @@ isabelle scalac -d classes \
   src/isabelle/jedit/Refactor_Plugin.scala \
   src/isabelle/jedit/utils.scala \
   src/isabelle/jedit/headless_handler.scala \
-  src/isabelle/jedit/edits.scala
+  src/isabelle/jedit/edits.scala \
+  src/isabelle/jedit/promote_have.scala
 
 cp -r classes/* jarroot/
 cp actions.xml Refactor.props plugin.props jarroot/

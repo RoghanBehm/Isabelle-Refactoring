@@ -5,6 +5,7 @@ import org.gjt.sp.jedit.textarea.JEditTextArea
 import java.io.{File => JFile}
 import javax.swing.JOptionPane
 import org.gjt.sp.jedit.View
+
 object MarkupUtils {
 
 
@@ -40,6 +41,14 @@ object MarkupUtils {
       _ <- markup.properties.collectFirst { case ("def_offset", _) => () }
     } yield ref_id
   }
+
+  // Return an offset to directly after the begin keyword
+  def offset_after_begin(snapshot: Document.Snapshot): Option[Int] =
+  find_markup(
+    snapshot,
+    Markup.Elements(Markup.COMMAND_SPAN),
+    m => Markup.Command_Span.unapply(m).exists(_.is_begin)
+  ).headOption.map(_.stop)
 
   /* Entity lookup */
 

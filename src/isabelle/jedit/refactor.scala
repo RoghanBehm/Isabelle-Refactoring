@@ -7,4 +7,5 @@ import org.gjt.sp.jedit.View
 
 object Refactor {
   def rename(view: View): Unit = Rename(view)
+  def promote_have(view: View): Unit = Promote_Have(view)
 }
