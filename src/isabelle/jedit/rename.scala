@@ -1,6 +1,6 @@
 package isabelle.jedit
 
-import isabelle.{GUI_Thread, Markup, Text, Document}
+import isabelle.{GUI_Thread, Markup, Text, Document, Rendering}
 import javax.swing.JOptionPane
 import org.gjt.sp.jedit.View
 import org.gjt.sp.jedit.jEdit
@@ -211,8 +211,9 @@ object Rename {
         name.endsWith("." + short + "_") ||
         name.startsWith(short + "_")
 
-    MarkupUtils.collect_ranges(
+    MarkupUtils.find_markup(
       snapshot,
+      Rendering.entity_elements,
       markup =>
         Markup.Entity.Occ.unapply(markup).contains(target_id) ||
           MarkupUtils.ref_to_def_id(markup).exists(all_ids.contains) ||

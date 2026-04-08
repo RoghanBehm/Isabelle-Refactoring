@@ -38,4 +38,12 @@ object Edit {
     grouped.keys.toList
   }
 
+
+  private def check_no_overlap(sorted_desc: List[Edit]): Unit = {
+    sorted_desc.sliding(2).foreach {
+      case List(a, b) if b.range.stop > a.range.start =>
+        throw new IllegalArgumentException(s"Overlapping edits: $a vs $b")
+      case _ =>
+    }
+  }
 }

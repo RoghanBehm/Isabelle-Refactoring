@@ -7,17 +7,19 @@ import javax.swing.JOptionPane
 import org.gjt.sp.jedit.View
 object MarkupUtils {
 
-  def collect_ranges(
-      snapshot: Document.Snapshot,
-      matches: Markup => Boolean
-  ): List[Text.Range] = {
+
+  def find_markup(
+    snapshot: Document.Snapshot,
+    elements: Markup.Elements,
+    matches: Markup => Boolean
+  ): List[Text.Range]  = {
     val full_range = Text.Range(0, snapshot.node.source.length)
 
     snapshot
       .cumulate[List[Text.Range]](
         full_range,
         Nil,
-        Rendering.entity_elements,
+        elements,
         _ => {
           case (acc, Text.Info(range, XML.Elem(markup, _))) if matches(markup) =>
             Some(range :: acc)
@@ -27,7 +29,6 @@ object MarkupUtils {
       .flatMap(_.info)
       .distinct
   }
-
   def short_name(qualified: String): String = {
     val dot = qualified.lastIndexOf('.')
     if (dot >= 0) qualified.substring(dot + 1) else qualified
