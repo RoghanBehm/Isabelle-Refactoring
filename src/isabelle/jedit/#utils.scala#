@@ -1,0 +1,239 @@
+package isabelle.jedit
+
+import isabelle.{Document, Markup, Rendering, Value, Text, XML, Sessions, GUI_Thread, Output}
+import org.gjt.sp.jedit.textarea.JEditTextArea
+import java.io.{File => JFile}
+import javax.swing.JOptionPane
+import org.gjt.sp.jedit.View
+object MarkupUtils {
+
+  def collect_ranges(
+      snapshot: Document.Snapshot,
+      matches: Markup => Boolean
+  ): List[Text.Range] = {
+    val full_range = Text.Range(0, snapshot.node.source.length)
+
+    snapshot
+      .cumulate[List[Text.Range]](
+        full_range,
+        Nil,
+        Rendering.entity_elements,
+        _ => {
+          case (acc, Text.Info(range, XML.Elem(markup, _))) if matches(markup) =>
+            Some(range :: acc)
+          case _ => None
+        }
+      )
+      .flatMap(_.info)
+      .distinct
+  }
+
+  def short_name(qualified: String): String = {
+    val dot = qualified.lastIndexOf('.')
+    if (dot >= 0) qualified.substring(dot + 1) else qualified
+  }
+  def ref_to_def_id(markup: Markup): Option[Long] = {
+    for {
+      ref_str <- markup.properties.collectFirst { case ("ref", v) => v }
+      ref_id <- Value.Long.unapply(ref_str)
+      _ <- markup.properties.collectFirst { case ("def_offset", _) => () }
+    } yield ref_id
+  }
+
+  /* Entity lookup */
+  def entity_by_name(
+      kind: String,
+      target_name: String,
+      snapshot: Document.Snapshot
+  ): Option[Long] =
+    snapshot
+      .cumulate[Option[Long]](
+        Text.Range(0, snapshot.node.source.length),
+        None,
+        Rendering.entity_elements,
+        _ => {
+          case (None, Text.Info(_, XML.Elem(markup, _))) =>
+            Markup.Entity.unapply(markup) match {
+              case Some((`kind`, `target_name`)) =>
+                val id = Markup.Entity.Occ
+                  .unapply(markup)
+                  .orElse(
+                    markup.properties
+                      .collectFirst { case ("def", v) => v }
+                      .flatMap(Value.Long.unapply)
+                  )
+                id.map(Some(_))
+              case _ => None
+            }
+          case _ => None
+        }
+      )
+      .flatMap(_.info)
+      .headOption
+
+  def entity_by_short_name(
+      kind: String,
+      short: String,
+      snapshot: Document.Snapshot
+  ): Option[Long] =
+    snapshot
+      .cumulate[Option[Long]](
+        Text.Range(0, snapshot.node.source.length),
+        None,
+        Rendering.entity_elements,
+        _ => {
+          case (None, Text.Info(_, XML.Elem(markup, _))) =>
+            Markup.Entity.unapply(markup) match {
+              case Some((`kind`, n)) if short_name(n) == short =>
+                val id = Markup.Entity.Occ
+                  .unapply(markup)
+                  .orElse(
+                    markup.properties
+                      .collectFirst { case ("def", v) => v }
+                      .flatMap(Value.Long.unapply)
+                  )
+                id.map(Some(_))
+              case _ => None
+            }
+          case _ => None
+        }
+      )
+      .flatMap(_.info)
+      .headOption
+
+  def collect_all_entity_ids(
+      target_kind: String,
+      target_name: String,
+      snapshot: Document.Snapshot
+  ): Set[Long] = {
+    val short = short_name(target_name)
+    snapshot
+      .cumulate[Set[Long]](
+        Text.Range(0, snapshot.node.source.length),
+        Set.empty,
+        Rendering.entity_elements,
+        _ => { case (acc, Text.Info(_, XML.Elem(markup, _))) =>
+          val def_id = markup.properties
+            .collectFirst { case ("def", v) => v }
+            .flatMap(Value.Long.unapply)
+          val has_kind = markup.properties.exists(_._1 == "kind")
+          val name_prop = markup.properties.collectFirst { case ("name", v) => v }
+          if (def_id.isDefined && name_prop.exists(_.contains(short))) {
+            Output.warning(s"[collect] saw def=${def_id} name=$name_prop has_kind=${markup.properties.exists(_._1 == "kind")} all_props=${markup.properties}")
+          }
+          val kinded_match = Markup.Entity.unapply(markup).exists { case (k, n) =>
+            k == target_kind && (target_name == n || short == n)
+          }
+          // No-kind def with matching name: the "raw" form of a definition.
+          // Bound-var refs don't carry `def`, so this can't catch them.
+          val raw_match = !has_kind && def_id.isDefined && name_prop.contains(short)
+
+          if ((kinded_match || raw_match) && def_id.isDefined)
+            Some(acc + def_id.get)
+          else None
+        }
+      )
+      .flatMap(_.info)
+      .toSet
+  }
+}
+object JEditUtils {
+
+  def entity_at_caret(
+      text_area: JEditTextArea,
+      snapshot: Document.Snapshot
+  ): List[(String, String, Option[Long])] = {
+    val caret_range = JEdit_Lib.caret_range(text_area)
+    snapshot
+      .cumulate[List[(String, String, Option[Long])]](
+        caret_range,
+        Nil,
+        Rendering.entity_elements,
+        _ => { case (acc, Text.Info(_, XML.Elem(markup, _))) =>
+          (Markup.Entity.unapply(markup), Markup.Entity.Occ.unapply(markup)) match {
+            case (Some((kind, name)), occ_id) => Some((kind, name, occ_id) :: acc)
+            case _                            => None
+          }
+        }
+      )
+      .flatMap(_.info)
+  }
+
+  /* UI */
+
+  def progress_dialog(
+      view: View
+  ): (javax.swing.JDialog, javax.swing.JLabel) = {
+    val dialog = new javax.swing.JDialog(view, "Renaming…", true)
+    val label = new javax.swing.JLabel("Loading theories…")
+    val progress_bar = new javax.swing.JProgressBar()
+    progress_bar.setIndeterminate(true)
+    val panel = new javax.swing.JPanel()
+    panel.setLayout(new javax.swing.BoxLayout(panel, javax.swing.BoxLayout.Y_AXIS))
+    panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(20, 20, 20, 20))
+    panel.add(label)
+    panel.add(javax.swing.Box.createVerticalStrut(10))
+    panel.add(progress_bar)
+    dialog.add(panel)
+    dialog.setDefaultCloseOperation(javax.swing.WindowConstants.DO_NOTHING_ON_CLOSE)
+    dialog.pack()
+    dialog.setLocationRelativeTo(view)
+    (dialog, label)
+  }
+  def theory_progress(label: javax.swing.JLabel): isabelle.Progress =
+    new isabelle.Progress {
+      override def output(msgs: isabelle.Progress.Output): Unit =
+        for (msg <- msgs) msg match {
+          case thy: isabelle.Progress.Theory =>
+            GUI_Thread.later { label.setText(s"Checking ${thy.theory}…") }
+          case _ =>
+        }
+    }
+
+}
+
+object SessionUtils {
+
+  /** Walk upward from `start` looking for a session root directory. Prefers directories containing
+    * ROOTS; falls back to ROOT.
+    */
+  def find_session_dir(start: JFile): Option[isabelle.Path] = {
+    var roots_dir: Option[JFile] = None
+    var root_dir: Option[JFile] = None
+    var d = start
+
+    while (d != null) {
+      if (roots_dir.isEmpty && new JFile(d, "ROOTS").exists()) roots_dir = Some(d)
+      if (root_dir.isEmpty && new JFile(d, "ROOT").exists()) root_dir = Some(d)
+      d = d.getParentFile
+    }
+
+    roots_dir.orElse(root_dir).map(f => isabelle.Path.explode(f.getPath))
+  }
+
+  /* Project resolution */
+
+  case class ProjectInfo(
+      project_session: String,
+      parent: String,
+      theory_short_names: List[String],
+      master_dir: String,
+      extra_dirs: List[isabelle.Path]
+  )
+  def resolve_project(current_file: String): ProjectInfo = {
+    val options = PIDE.options.value
+    val dir = new JFile(current_file).getParent
+    val extra_dirs = find_session_dir(new JFile(dir)).toList
+    val sessions =
+      JEdit_Session.sessions_structure(dirs = JEdit_Session.session_dirs ::: extra_dirs)
+    val project_session = sessions.session_directories
+      .get(new JFile(dir).getCanonicalFile)
+      .getOrElse(JEdit_Session.logic_name(options))
+    val info = sessions(project_session)
+    val parent = info.parent.getOrElse(JEdit_Session.logic_name(options))
+    val theory_short_names = info.theories.flatMap(_._2.map(_._1))
+    val master_dir = info.dir.implode
+    ProjectInfo(project_session, parent, theory_short_names, master_dir, extra_dirs)
+  }
+
+}

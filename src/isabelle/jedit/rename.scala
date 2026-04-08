@@ -32,60 +32,74 @@ object Rename {
           snapshot = Document_View.rendering(doc_view).snapshot
         } yield JEditUtils.entity_at_caret(text_area, snapshot)).getOrElse(Nil)
 
-      val target_name = entities.collectFirst { case ("constant", name, _) => name }
-      val old_short_name = target_name.map(MarkupUtils.short_name)
-      val current_file = view.getBuffer.getPath
+      val target_name_opt = entities.collectFirst { case ("constant", name, _) => name }
 
-      val (dialog, label) = JEditUtils.progress_dialog(view)
-
-      jEdit.getBuffers.foreach { buf =>
-        if (buf.isDirty) buf.save(view, null)
+      target_name_opt match {
+        case None =>
+          JOptionPane.showMessageDialog(
+            view,
+            "No constant found at caret.",
+            "Rename",
+            JOptionPane.INFORMATION_MESSAGE
+          )
+        case Some(target_name) =>
+          run_rename(view, target_name)
       }
+    }
+  }
 
-      val result_promise = Promise[RenameResult]()
-      val progress = JEditUtils.theory_progress(label)
+  private def run_rename(view: View, target_name: String): Unit = {
+    val current_file = view.getBuffer.getPath
 
-      dialog.addWindowListener(new java.awt.event.WindowAdapter {
-        override def windowClosing(e: java.awt.event.WindowEvent): Unit = {
-          progress.stop()
-          Headless_Handler.cancel()
-          label.setText("Cancelling…")
-        }
-      })
+    val (dialog, label) = JEditUtils.progress_dialog(view)
 
-      val thread_name = s"isabelle-rename-${target_name.getOrElse("unknown")}"
-      new Thread(
-        () => {
-          try {
-            val result = find_all_occurrences(target_name, current_file, progress)
-            result_promise.success(result)
-            ()
-          } catch {
-            case e: Throwable =>
-              result_promise.failure(e)
-              ()
-          } finally {
-            GUI_Thread.later { dialog.dispose() }
-          }
-        },
-        thread_name
-      ).start()
+    jEdit.getBuffers.foreach { buf =>
+      if (buf.isDirty) buf.save(view, null)
+    }
 
-      dialog.setVisible(true) // blocks until dialog is gone
+    val result_promise = Promise[RenameResult]()
+    val progress = JEditUtils.theory_progress(label)
 
-      if (!progress.stopped) {
+    dialog.addWindowListener(new java.awt.event.WindowAdapter {
+      override def windowClosing(e: java.awt.event.WindowEvent): Unit = {
+        progress.stop()
+        Headless_Handler.cancel()
+        label.setText("Cancelling…")
+      }
+    })
+
+    val thread_name = s"isabelle-rename-$target_name"
+    new Thread(
+      () => {
         try {
-          val rename_result = Await.result(result_promise.future, Duration.Inf)
-          prompt_and_apply(view, rename_result, old_short_name)
+          val result = find_all_occurrences(target_name, current_file, progress)
+          result_promise.success(result)
+          ()
         } catch {
           case e: Throwable =>
-            JOptionPane.showMessageDialog(
-              view,
-              e.getMessage,
-              "Rename error",
-              JOptionPane.ERROR_MESSAGE
-            )
+            result_promise.failure(e)
+            ()
+        } finally {
+          GUI_Thread.later { dialog.dispose() }
         }
+      },
+      thread_name
+    ).start()
+
+    dialog.setVisible(true) // blocks until dialog is gone
+
+    if (!progress.stopped) {
+      try {
+        val rename_result = Await.result(result_promise.future, Duration.Inf)
+        prompt_and_apply(view, rename_result)
+      } catch {
+        case e: Throwable =>
+          JOptionPane.showMessageDialog(
+            view,
+            e.getMessage,
+            "Rename error",
+            JOptionPane.ERROR_MESSAGE
+          )
       }
     }
   }
@@ -93,24 +107,26 @@ object Rename {
   /* All occurrences across all theories in ROOT */
 
   private def find_all_occurrences(
-      target_name: Option[String],
+      target_name: String,
       current_file: String,
       progress: isabelle.Progress
   ): RenameResult = {
 
     Headless_Handler.ensure_running(current_file, progress)
-    val defining_theory = target_name.map(n => n.take(n.lastIndexOf('.')))
+    val defining_theory = target_name.take(target_name.lastIndexOf('.'))
     val defining_node = Headless_Handler.nodes.find { name =>
       val short = name.theory.drop(name.theory.lastIndexOf('.') + 1)
-      defining_theory.contains(short)
+      short == defining_theory
     }
 
     val (headless_id, all_ids) = defining_node match {
       case None => (None, Set.empty[Long])
       case Some(name) =>
         val snapshot = Headless_Handler.snapshot(name).get
-        val id = MarkupUtils.entity_by_name("constant", target_name, snapshot)
-        val ids = MarkupUtils.collect_all_entity_ids(target_name, snapshot)
+        // NOTE: entity_by_name and collect_all_entity_ids still take Option[String]
+         // (I should un-optional them)
+        val id = MarkupUtils.entity_by_name("constant", Some(target_name), snapshot)
+        val ids = MarkupUtils.collect_all_entity_ids(Some(target_name), snapshot)
         (id, ids ++ id.toSet)
     }
 
@@ -129,8 +145,7 @@ object Rename {
 
   private def prompt_and_apply(
       view: View,
-      result: RenameResult,
-      old_short_name: Option[String]
+      result: RenameResult
   ): Unit = {
     val ranges_str =
       if (result.occurrences.isEmpty) "  (none)"
@@ -149,57 +164,52 @@ object Rename {
         s"ID: ${result.targetId.getOrElse("none")}\nMatches:\n$ranges_str\n\nEnter replacement name:"
       )
     )
-
-    (new_name, old_short_name) match {
-      case (Some(name), Some(old_name)) if name.nonEmpty =>
-        apply_renames(result.occurrences, old_name, name)
+    new_name match {
+      case Some(name) if name.nonEmpty =>
+        val edits = build_rename_edits(result.occurrences, name)
+        Edit.apply_to_files(edits)
         reload_buffers(view, result.occurrences.map(_._1))
       case _ => // User cancelled or left blank
     }
+
   }
 
   /* File rewriting */
 
-  private def apply_renames(
+  private def build_rename_edits(
       occurrences: List[(Document.Node.Name, List[Text.Range])],
-      old_name: String,
       new_name: String
-  ): Unit =
-    occurrences.foreach { case (node_name, ranges) =>
-      val path = isabelle.Path.explode(node_name.node)
-      val text = isabelle.File.read(path)
-      val result = ranges.sortBy(_.start).reverse.foldLeft(text) { (t, r) =>
-        t.substring(0, r.start) + t.substring(r.start, r.stop).replace(old_name, new_name) +
-          t.substring(r.stop)
-      }
-      isabelle.File.write(path, result)
-    }
+  ): List[(Document.Node.Name, Edit)] =
+    for {
+      (node, ranges) <- occurrences
+      r <- ranges
+    } yield node -> Edit.Replace(r, new_name)
+
   private def reload_buffers(view: View, nodes: List[Document.Node.Name]): Unit =
     nodes.foreach { node_name =>
       val buf = jEdit.getBuffer(node_name.node)
       if (buf != null) buf.reload(view)
     }
+
   /* Entity occurrence finding */
 
   def find_occurrences(
       target_id: Long,
       all_ids: Set[Long],
-      target_name: Option[String],
+      target_name: String,
       snapshot: Document.Snapshot
   ): List[Text.Range] = {
     val name_matches: String => Boolean = name =>
-      target_name.exists(t => t == name || t.endsWith("." + name))
+      target_name == name || target_name.endsWith("." + name)
 
     // Matches derived names (e.g. myConst_def, myConst_simps)
     // Not an ideal solution, but derived names doesn't match
     // user-defined suffixes
+    val short = MarkupUtils.short_name(target_name)
     val matches_derived: String => Boolean = name =>
-      target_name.exists { t =>
-        val s = MarkupUtils.short_name(t)
-        name.startsWith(t + "_") ||
-        name.endsWith("." + s + "_") ||
-        name.startsWith(s + "_")
-      }
+      name.startsWith(target_name + "_") ||
+        name.endsWith("." + short + "_") ||
+        name.startsWith(short + "_")
 
     MarkupUtils.collect_ranges(
       snapshot,
@@ -214,7 +224,5 @@ object Rename {
     )
 
   }
-
-
 
 }
